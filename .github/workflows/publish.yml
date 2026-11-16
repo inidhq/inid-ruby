@@ -1,0 +1,39 @@
+name: publish
+# A version tag (from release.yml): its GitHub release, with what changed since the last one,
+# and the package on its registry. Each registry step runs once the registry is set up and
+# the repo variable that turns it on is "true" (see RELEASING.md in InID's repo).
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  github:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          git log --format='- %s' "${previous:+$previous..}$GITHUB_REF_NAME" -- . ':(exclude).github' > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+  rubygems:
+    needs: github
+    if: vars.PUBLISH_RUBYGEMS == 'true'
+    runs-on: ubuntu-latest
+    environment: rubygems
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - run: sed -i "s/VERSION = \".*\"/VERSION = \"${GITHUB_REF_NAME#v}\"/" lib/inid/version.rb
+      - run: gem build inid.gemspec
+      # RubyGems' trusted publishing: no API key
+      - uses: rubygems/configure-rubygems-credentials@v1.0.0
+      - run: gem push inid-*.gem

@@ -1,5 +1,9 @@
 name: test
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]  # main: release.yml runs these first
+  workflow_call:
 jobs:
   test:
     runs-on: ubuntu-latest
