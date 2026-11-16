@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "minitest", "~> 5.20"
+gem "rack", "~> 3.0"
+gem "rack-test", "~> 2.1"
+gem "rake", "~> 13.0"
