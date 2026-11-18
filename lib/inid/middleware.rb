@@ -7,7 +7,7 @@ module InID
   #   use InID::Middleware, protect: ["/dashboard", %r{\A/reports}, { path: "/admin", role: "admin", entrance: "team" }]
   #
   # protect: path strings (a path and its subpaths), regexps, hashes with path:, role:,
-  # permission:, entrance:, or a proc taking the env. routes: false leaves the api path to the app.
+  # permission:, team_role:, entrance:, or a proc taking the env. routes: false leaves the api path to the app.
   # Any other option (publishable_key:, secret_key:, issuer:…) builds the client, or pass client:.
   class Middleware
     def initialize(app, protect: [], routes: true, client: nil, **client_options)
@@ -46,8 +46,8 @@ module InID
         to << ["entrance", entrance] if entrance
         return Reply.redirect("#{client.origin(env)}#{api_path}/signin?#{URI.encode_www_form(to)}", result.set_cookies, status: 307)
       end
-      if session && matched.any? { |rule| !session.user.has?(role: rule.role, permission: rule.permission) }
-        # Signed in, without the role or permission the path needs
+      if session && matched.any? { |rule| !session.user.has?(role: rule.role, permission: rule.permission, team_role: rule.team_role) }
+        # Signed in, without the role, team role or permission the path needs
         return Reply.response(403, { "content-type" => "text/plain; charset=utf-8" }, "Forbidden", result.set_cookies)
       end
 
@@ -67,16 +67,17 @@ module InID
     end
   end
 
-  # A path (and its subpaths) or a pattern that needs someone signed in, and maybe a role or
-  # permission; entrance: the door its sign-in goes through
-  Rule = Struct.new(:path, :role, :permission, :entrance) do
+  # A path (and its subpaths) or a pattern that needs someone signed in, and maybe a role, a
+  # role in their active team (team_role) or a permission; entrance: the door its sign-in goes
+  # through
+  Rule = Struct.new(:path, :role, :permission, :entrance, :team_role) do
     def self.from(rule)
       case rule
       when Rule then rule
       when String, Regexp then new(rule)
       when Hash
         h = rule.transform_keys(&:to_sym)
-        new(h[:path], h[:role]&.to_s, h[:permission]&.to_s, h[:entrance]&.to_s)
+        new(h[:path], h[:role]&.to_s, h[:permission]&.to_s, h[:entrance]&.to_s, (h[:team_role] || h[:teamRole])&.to_s)
       else raise ArgumentError, "InID protect rule must be a String, Regexp or Hash: #{rule.inspect}"
       end
     end

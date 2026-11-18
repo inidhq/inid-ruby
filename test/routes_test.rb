@@ -196,7 +196,7 @@ class SignOutAndSessionTest < Minitest::Test
     body = JSON.parse(last_response.body)
     assert_equal({ "id" => "u1", "firstName" => "Ana", "lastName" => "Gómez", "name" => "Ana Gómez", "email" => "ana@correo.co",
                    "emailVerified" => true, "phone" => "+573001234567", "roles" => ["staff"], "permissions" => ["orders:read"],
-                   "publicMetadata" => { "plan" => "pro" } }, body["user"])
+                   "publicMetadata" => { "plan" => "pro" }, "team" => nil }, body["user"])
     assert_equal "#{FakeInID::ISSUER}/account?client_id=pk_test_app", body["accountUrl"]
 
     visit("/api/inid/session")
@@ -205,7 +205,12 @@ class SignOutAndSessionTest < Minitest::Test
     bare = { "iss" => FakeInID::ISSUER, "aud" => "pk_test_app", "sub" => "u2", "exp" => Time.now.to_i + 600, "name" => "Solo" }
     visit("/api/inid/session", cookie: "__inid_session=#{FakeInID.sign(bare)}")
     assert_equal({ "id" => "u2", "firstName" => nil, "lastName" => nil, "name" => "Solo", "email" => nil, "emailVerified" => false,
-                   "phone" => nil, "roles" => [], "permissions" => [], "publicMetadata" => {} }, JSON.parse(last_response.body)["user"])
+                   "phone" => nil, "roles" => [], "permissions" => [], "publicMetadata" => {}, "team" => nil },
+                 JSON.parse(last_response.body)["user"])
+
+    # The active team
+    visit("/api/inid/session", cookie: session_cookie(600, team: FakeInID::TEAM.merge("permissions" => ["invoices:write", 3])))
+    assert_equal FakeInID::TEAM, JSON.parse(last_response.body)["user"]["team"]
 
     # Renewal happens here too
     visit("/api/inid/session", cookie: "#{session_cookie(10)}; __inid_refresh=rt")

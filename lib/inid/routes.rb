@@ -42,8 +42,10 @@ module InID
     end
   end
 
-  # The app's routes under api_path: signin, callback, signout, session, sessions
+  # The app's routes under api_path: signin, callback, signout, session, sessions, team, teams
   class Routes
+    TEAMS_REST = %r{\A(/[\w-]{1,80}){0,4}\z}
+
     def initialize(client)
       @client = client
     end
@@ -58,6 +60,8 @@ module InID
       elsif method == "GET" && action == "callback" then callback(env, query)
       elsif method == "POST" && action == "signout" then sign_out(env)
       elsif action == "sessions" || action.start_with?("sessions/") then sessions(env, method, action, query)
+      elsif method == "POST" && action == "team" then switch_team(env)
+      elsif action == "teams" || action.start_with?("teams/") then teams(env, method, action)
       elsif method == "GET" && action == "session" then session(env)
       else Reply.json(404, { "error" => "not_found" })
       end
@@ -167,6 +171,64 @@ module InID
                    "user" => result.session&.user&.to_h,
                    "accountUrl" => "#{@client.issuer}/account?#{URI.encode_www_form(client_id: @client.publishable_key)}"
                  }, result.set_cookies)
+    end
+
+    def body_of(env, limit = 64 * 1024)
+      input = env["rack.input"]
+      return "" unless input
+
+      input.rewind if input.respond_to?(:rewind)
+      input.read(limit).to_s
+    end
+
+    # The person's active team: POST team { "teamId" } (null: their own account). InID renews
+    # the session with it, so the new cookies (and this answer) say the team.
+    def switch_team(env)
+      secure = @client.secure?(env)
+      refresh = cookies(env)[Client::COOKIE_REFRESH]
+      current = @client.read_session(env["HTTP_COOKIE"], secure: secure).session
+      return Reply.json(401, { "error" => "not_signed_in" }) unless current && refresh
+
+      given = begin
+        JSON.parse(body_of(env))
+      rescue JSON::ParserError
+        {}
+      end
+      asked = given.is_a?(Hash) ? given["teamId"] : nil
+      return Reply.json(400, { "error" => "invalid_request" }) unless asked.nil? || asked.is_a?(String)
+
+      begin
+        tokens = @client.token(grant_type: "refresh_token", refresh_token: refresh, team: asked.to_s)
+        renewed = @client.verify_id_token(tokens["id_token"])
+        raise APIError.new("invalid_id_token", 400) unless renewed
+      rescue APIError => e
+        # The session itself is over; anything else (a team they aren't in) leaves it as it was
+        return Reply.json(401, { "error" => "not_signed_in" }, @client.clear_cookies(secure)) if e.code == "invalid_grant"
+
+        return Reply.json(e.status && e.status < 500 ? 400 : 502, { "error" => e.code })
+      end
+      Reply.json(200, { "user" => User.from_claims(renewed[:claims]).to_h }, @client.session_cookies(tokens, secure))
+    end
+
+    # The person's own teams, through the app's server (InID checks what their team role lets
+    # them do): teams, teams/{id}, teams/{id}/members… → /v1/users/{sub}/teams…
+    def teams(env, method, action)
+      current = @client.read_session(env["HTTP_COOKIE"], secure: @client.secure?(env)).session
+      return Reply.json(401, { "error" => "not_signed_in" }) unless current
+
+      rest = action.delete_prefix("teams")
+      unless rest.match?(TEAMS_REST) && %w[GET POST PATCH DELETE].include?(method)
+        return Reply.json(404, { "error" => "not_found" })
+      end
+
+      body = %w[POST PATCH].include?(method) ? body_of(env, 1024 * 1024) : ""
+      res = @client.app_request(method, "/v1/users/#{Util.escape(current.user.id)}/teams#{rest}", body.empty? ? nil : body)
+      answer = begin
+        JSON.parse(res.body.to_s)
+      rescue JSON::ParserError
+        { "error" => "teams_unavailable" }
+      end
+      Reply.json(res.status >= 500 ? 502 : res.status, answer)
     end
 
     # The person's sessions at this app; DELETE sessions/{id} ends one, sessions?others=1 all

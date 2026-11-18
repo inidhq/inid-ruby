@@ -132,7 +132,7 @@ module InID
 
     # ---------- the routes under api_path ----------
 
-    # A Rack app answering signin, callback, signout, session and sessions under api_path
+    # A Rack app answering signin, callback, signout, session, sessions, team and teams under api_path
     def call(env)
       Routes.new(self).call(env)
     end
@@ -206,6 +206,13 @@ module InID
       raise APIError.new((parsed.is_a?(Hash) && parsed["error"]) || "request_failed", res.status) unless res.ok?
 
       parsed
+    end
+
+    # A call to InID's app API with a raw JSON body (or none), answered as it is (status, body)
+    def app_request(method, path, raw_body = nil)
+      headers = { "Authorization" => "Bearer #{secret_key}", "Accept" => "application/json" }
+      headers["Content-Type"] = "application/json" if raw_body
+      @transport.call(method, "#{issuer}#{path}", headers: headers, body: raw_body)
     end
 
     def session_cookies(tokens, secure)

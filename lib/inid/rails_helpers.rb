@@ -16,8 +16,10 @@ module InID
 
       module ClassMethods
         # require_inid! role: "admin", only: [:edit]  (a before_action)
-        def require_inid!(role: nil, permission: nil, entrance: nil, **filter_options)
-          before_action(**filter_options) { require_inid!(role: role, permission: permission, entrance: entrance) }
+        def require_inid!(role: nil, permission: nil, entrance: nil, team_role: nil, **filter_options)
+          before_action(**filter_options) do
+            require_inid!(role: role, permission: permission, entrance: entrance, team_role: team_role)
+          end
         end
       end
 
@@ -29,15 +31,15 @@ module InID
       def inid_user = inid_auth.user
       def inid_signed_in? = inid_auth.signed_in?
 
-      # Sends whoever isn't signed in to sign in (and back here); 403 without the role or
-      # permission asked
-      def require_inid!(role: nil, permission: nil, entrance: nil)
+      # Sends whoever isn't signed in to sign in (and back here); 403 without the role, team
+      # role or permission asked
+      def require_inid!(role: nil, permission: nil, entrance: nil, team_role: nil)
         unless inid_signed_in?
           to = [["return_to", request.fullpath]]
           to << ["entrance", entrance] if entrance
           return redirect_to("#{InID.client.api_path}/signin?#{URI.encode_www_form(to)}", allow_other_host: false)
         end
-        return if inid_user.has?(role: role&.to_s, permission: permission&.to_s)
+        return if inid_user.has?(role: role&.to_s, permission: permission&.to_s, team_role: team_role&.to_s)
 
         head :forbidden
       end

@@ -37,9 +37,15 @@ get "/dashboard" do
 end
 ```
 
-The middleware answers InID's routes under `/api/inid` (sign in, callback, sign out, session, sessions), renews the session before it ends, sends whoever isn't signed in from a protected path to sign in (and back), and answers `403` to someone signed in without the role or permission a rule asks for.
+The middleware answers InID's routes under `/api/inid` (sign in, callback, sign out, session, sessions, team, teams), renews the session before it ends, sends whoever isn't signed in from a protected path to sign in (and back), and answers `403` to someone signed in without the role, team role or permission a rule asks for.
 
-`env["inid"]` is an `InID::Auth`: `signed_in?`, `user_id`, `user` (`id`, `first_name`, `last_name`, `name`, `email`, `email_verified?`, `phone`, `roles`, `permissions`, `public_metadata`), `session` (with the token's `claims`) and `has?(role: "admin")` / `has?(permission: "invoices:read")`.
+`env["inid"]` is an `InID::Auth`: `signed_in?`, `user_id`, `user` (`id`, `first_name`, `last_name`, `name`, `email`, `email_verified?`, `phone`, `roles`, `permissions`, `public_metadata`, `team`), `session` (with the token's `claims`) and `has?(role: "admin")` / `has?(permission: "invoices:read")` / `has?(team_role: "admin")`. Every check given must hold; with none, anyone signed in passes.
+
+### Teams
+
+In apps with teams, `user.team` is the person's active team (`InID::Team`: `id`, `slug`, `name`, `role`, `permissions`), or `nil` when they have none. `has?(team_role: "admin")` checks their role in that team, and `has?(permission: ...)` passes when the permission comes from their app role or from their team role. Protect rules and `require_inid!` take `team_role:` too: `{ path: "/billing", team_role: "owner" }`.
+
+The browser components switch the active team with `POST /api/inid/team` (`{"teamId": "team_..."}`, or `null` for their own account): InID renews the session with that team and the answer is `{"user": ...}`. `/api/inid/teams/...` forwards the person's own team calls (list, create, members, invitations) to InID with the app's secret key.
 
 Options: `protect:` (strings, regexps, hashes, or a proc taking the env), `routes: false` to leave `/api/inid` to your app (mount `InID.client` there, it's a Rack app), `client:` for a configured `InID::Client`, or the client's own options (`publishable_key:`, `secret_key:`, `issuer:`, `app_url:`, `api_path:`, `scope:`).
 

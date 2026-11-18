@@ -10,6 +10,7 @@ require "inid"
 class FakeInID
   ISSUER = "https://id.inid.example"
   KEY = OpenSSL::PKey::RSA.generate(2048)
+  TEAM = { "id" => "t1", "slug" => "acme", "name" => "Acme", "role" => "admin", "permissions" => ["invoices:write"] }.freeze
 
   attr_accessor :token_status, :token_down, :next_nonce
   attr_reader :requests, :jwks_hits
@@ -35,6 +36,14 @@ class FakeInID
 
       claims = self.class.claims(600)
       claims["nonce"] = next_nonce if next_nonce
+      asked = URI.decode_www_form(body.to_s).to_h
+      if asked.key?("team")
+        case asked["team"]
+        when "" then nil
+        when "t1" then claims["team"] = TEAM
+        else return reply(403, { error: "not_a_member" })
+        end
+      end
       reply(200, { id_token: self.class.sign(claims), refresh_token: "rt_new", access_token: "at", expires_in: 600 })
     when ["POST", "/oauth/revoke"] then reply(200, {})
     when ["GET", "/v1/users/u1/sessions"]
@@ -43,6 +52,9 @@ class FakeInID
                               { id: "s3", createdAt: "e", lastActiveAt: "f", device: nil }] })
     when ["DELETE", "/v1/users/u1/sessions/s1"], ["DELETE", "/v1/users/u1/sessions/s3"], ["DELETE", "/v1/users/u1/sessions/s9"]
       reply(200, { ended: 1 })
+    when ["GET", "/v1/users/u1/teams"] then reply(200, { teams: [{ id: "t1" }] })
+    when ["POST", "/v1/users/u1/teams"] then reply(201, { id: "t2" })
+    when ["GET", "/v1/users/u1/teams/boom"] then reply(500, { error: "server_error" })
     when ["PUT", "/v1/users/u1/role"] then reply(200, { id: "u1", role: "admin" })
     when ["GET", "/v1/users/nobody"] then reply(404, { error: "user_not_found" })
     else reply(404, { error: "not_found" })
@@ -95,9 +107,11 @@ module InIDTestHelpers
   end
 
   # A request with exactly these cookies (not rack-test's jar)
-  def visit(path, cookie: "", method: "GET")
+  def visit(path, cookie: "", method: "GET", body: nil)
     @seen.clear
-    custom_request(method, path, {}, { "HTTP_COOKIE" => cookie })
+    env = { "HTTP_COOKIE" => cookie }
+    env.merge!(input: body, "CONTENT_TYPE" => "application/json") if body
+    custom_request(method, path, {}, env)
     last_response
   end
 
